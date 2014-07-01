@@ -26,7 +26,29 @@ using namespace cv;
 class SimpleMicrosoftViewer
 {
 public:
-	SimpleMicrosoftViewer () : viewer(new pcl::visualization::PCLVisualizer("cloud viewer")), normals(new pcl::PointCloud<pcl::Normal>), sharedCloud(new pcl::PointCloud<pcl::PointXYZRGBA>), first(false), update(false) {}
+	void keyboardEvent_cb_(const pcl::visualization::KeyboardEvent& et){
+		if (!et.keyDown())
+			return;
+		// Esc or space key
+		if(et.getKeyCode() == 27 || et.getKeyCode() == 32)
+		{
+			cout<<"Terminate the cloud viewer!\n";
+			isStop = true;
+		}
+	}
+
+	SimpleMicrosoftViewer () : 
+		viewer(new pcl::visualization::PCLVisualizer("cloud viewer")), 
+		normals(new pcl::PointCloud<pcl::Normal>), 
+		sharedCloud(new pcl::PointCloud<pcl::PointXYZRGBA>), 
+		first(false), 
+		update(false),
+		isStop(false) 
+	{
+		boost::function<void(const pcl::visualization::KeyboardEvent&)> fEvent = 
+			boost::bind(&SimpleMicrosoftViewer::keyboardEvent_cb_,this,_1);
+		viewer->registerKeyboardCallback(fEvent);
+	}
 
 	void GetMatFromCloud(const PointCloud<PointXYZRGBA> &cloud, Mat &img) {
 		img = Mat(cloud.height,cloud.width,CV_8UC3);
@@ -71,6 +93,7 @@ public:
 			update = true;
 			normalMutex.unlock();
 			waitKey(1);
+			
 		}
 	}
 
@@ -98,6 +121,14 @@ public:
 		depths.push_back(depth);*/
 	}
 
+	void image_depth_cb_ (const boost::shared_ptr<Mat>& image, const MatDepth & depth, float) 
+	{
+		imshow("depth",depth);
+		imshow("image",*image);
+		waitKey(1);
+	}
+
+
 	void savedata() {
 		// create a new grabber for OpenNI devices
 		pcl::Grabber* my_interface = new pcl::Microsoft2Grabber();
@@ -123,42 +154,50 @@ public:
 
 	void run ()
 	{
+		bool depthOnlyMode = false;
+
 		// create a new grabber for OpenNI devices
-		pcl::Microsoft2Grabber* my_interface = new pcl::Microsoft2Grabber();
+		pcl::Microsoft2Grabber* my_interface = new pcl::Microsoft2Grabber(0, depthOnlyMode);
 
 		// make callback function from member function
 		boost::function<void (const boost::shared_ptr<const pcl::PointCloud<pcl::PointXYZRGBA> >&)> f =
 			boost::bind (&SimpleMicrosoftViewer::cloud_cb_, this, _1);
-		//boost::function<void (const boost::shared_ptr<Mat>&)> f2 =
-		//	boost::bind (&SimpleMicrosoftViewer::image_cb_, this, _1);
-		//boost::function<void (const MatDepth&)> f3 =
-		//	boost::bind (&SimpleMicrosoftViewer::depth_cb_, this, _1);
+		boost::function<void (const boost::shared_ptr<Mat>&)> f2 =
+				   	boost::bind (&SimpleMicrosoftViewer::image_cb_, this, _1);
+// 		boost::function<void (const MatDepth&)> f3 =
+// 					boost::bind (&SimpleMicrosoftViewer::depth_cb_, this, _1);
+		boost::function<void (const boost::shared_ptr<Mat>&, const MatDepth &, float)> f4 =
+			boost::bind (&SimpleMicrosoftViewer::image_depth_cb_,this,_1,_2,_3);
+		
+		boost::signals2::connection c = my_interface->registerCallback (f4);
 
-		my_interface->registerCallback (f);
 		//my_interface->registerCallback (f2);
 		//my_interface->registerCallback (f3);
 
-		//viewer.setBackgroundColor(0.0, 0.0, 0.5);
+		viewer->setBackgroundColor(0.0, 0.0, 0.5);
 		//my_interface->SetLargeCloud();
 		my_interface->start ();
 		Sleep(30);
 		//while(1)
 		//	boost::this_thread::sleep (boost::posix_time::seconds (1));
-		while (!viewer->wasStopped())
+		while (!viewer->wasStopped() && !isStop)
 		{
-			normalMutex.lock();
-			if(update) {
-				viewer->removePointCloud("cloud");
-				viewer->removePointCloud("original");
-				viewer->addPointCloud(sharedCloud,"original");
-				viewer->addPointCloudNormals<pcl::PointXYZRGBA,pcl::Normal>(sharedCloud, normals);
-				update = false;
-			}
+// 			normalMutex.lock();
+// 			if(update) {
+// 				viewer->removePointCloud("cloud");
+// 				viewer->removePointCloud("original");
+// 				viewer->addPointCloud(sharedCloud,"original");
+// 				viewer->addPointCloudNormals<pcl::PointXYZRGBA,pcl::Normal>(sharedCloud, normals);
+// 				update = false;
+// 			}
+// 			viewer->spinOnce();
+// 			normalMutex.unlock();
 			viewer->spinOnce();
-			normalMutex.unlock();
 		}
-
+		c.disconnect();
+		viewer->close();
 		my_interface->stop ();
+	
 	}
 
 	void run2() {
@@ -174,6 +213,7 @@ public:
 		ne.setInputCloud(cloud);
 		ne.compute(*normals);
 
+
 		// visualize normals
 		//viewer.addPointCloud<PointXYZRGBA>(cloud,"original");
 		/*viewer->addPointCloudNormals<pcl::PointXYZRGBA,pcl::Normal>(cloud, normals);
@@ -187,6 +227,7 @@ public:
 	boost::shared_ptr<pcl::visualization::PCLVisualizer> viewer;
 	bool first, update;
 	boost::mutex normalMutex;
+	bool isStop;
 };
 
 int
@@ -203,6 +244,7 @@ int
 	} catch (std::exception &e) {
 		cout << e.what() << endl;
 	}
+	cout<<"Press any key to terminate\n";
 	cin.get();
 	return (0);
 }
